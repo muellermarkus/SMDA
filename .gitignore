@@ -1,0 +1,25 @@
+# Mixed
+*.gz
+*.DS_Store
+*.aux
+*.log
+*.out
+*.blg
+*.bbl
+*.fls
+
+# Latex Build tool auxiliary files:
+*.fdb_latexmk
+*.synctex
+*.synctex(busy)
+*.synctex.gz
+*.synctex.gz(busy)
+*.pdfsync
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Jupyter Notebook
+.ipynb_checkpoints
