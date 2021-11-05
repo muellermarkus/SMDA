@@ -5,13 +5,12 @@
 # posts that contain a certain word
 
 # content is scraped once created, so votes do not reflect current votes
-
 # have to first scrape pushshift, then retrieve votes from reddit api
-
 # for a given user, can create profile of number of posts / comments per subreddit
 
 
 import praw
+import prawcore
 from psaw import PushshiftAPI
 import datetime as dt
 import pandas as pd
@@ -44,19 +43,20 @@ if not os.path.exists(data_path + '/posts'):
 # authenticate with reddit api
 r = praw.Reddit(client_id = app_id,
                 client_secret = app_secret,
-                user_agent = 'Webscraper by Markus Mueller')
-                # username = reddit_username,
-                # password = reddit_pw)
+                user_agent = 'Webscraper by Markus Mueller',
+                username = reddit_username,
+                password = reddit_pw)
 
-assert r.read_only == True, "reddit instance not correctly initialized"
+# assert r.read_only == True, "reddit instance not correctly initialized"
 
 api = PushshiftAPI(r)
 
 # define subreddits to scrape
-subreddits = ['electricvehicles', 'cars']
+# subreddits = ['electricvehicles']
+subreddits = ['electricvehicles'] # CLIMATE DESASTERS (search for posts that include that instead?) or 'global warming', 'climate change'
 
 # define time period to scrape
-start_time = int(dt.datetime(2017, 1, 1).timestamp())
+start_time = int(dt.datetime(2015, 1, 1).timestamp())
 end_time = int(dt.datetime(2021,10,31).timestamp())
 
 for sub in subreddits:
@@ -76,8 +76,12 @@ for sub in subreddits:
     for post in gen:
         cache.append(post.id)
         
-        # if len(cache) > 10:
+        # if len(cache) >= 100:
         #     break
+        
+    # save cache
+    pd.DataFrame(cache).to_csv(data_path + f'/posts/{sub}_cache.csv', index = False)
+    cache = pd.read_csv(data_path + f'/posts/{sub}_cache.csv')['0'].tolist()
   
     print(f"found {len(cache)} posts in r/{sub}")
         
@@ -107,10 +111,17 @@ for sub in subreddits:
                           post.over_18]
         
         # collect author data if available (deleted, automod, etc.)
-        if post.author is None:
+        try:
+            if post.author is None:
+                post_data.extend([''] * 2)
+            else: 
+                try:
+                    post_data.extend([post.author.id, post.author.name])
+                except AttributeError:
+                    post_data.extend([''] * 2)
+                    
+        except prawcore.exceptions.NotFound:
             post_data.extend([''] * 2)
-        else:
-            post_data.extend([post.author.id, post.author.name])
             
         post_data_list.append(post_data)
 
@@ -125,20 +136,20 @@ for sub in subreddits:
     post_data.columns = var_names
 
     # save post data
-    post_data.to_parquet(data_path + f'/posts/{sub}.gzip', compression='gzip')
+    post_data.to_json(data_path + f'/posts/{sub}.json', compression = "infer", force_ascii=True)
 
 
-
+# test = pd.read_json(data_path + f'/posts/{sub}.json')
 
 
 ##################################################33
 
-# PUT IN EXTRA PY SCRIPT
 
-# LOAD SUBMISSION IDS FROM DATA INSTEAD OF CACHE
+# check why many author ids and names missing 
 
-# clean up
-del(post_data)
+
+
+
 
 
 
@@ -148,58 +159,6 @@ del(post_data)
 
 
 
-
-# define data path
-data_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
-
-post_data = pd.read_parquet(data_path + f'/posts/{sub}.gzip')
-post_data = list(post_data["id"])
-
-# check if necessary folder exist
-if not os.path.exists(data_path + '/comments'):
-    os.makedirs(data_path + '/comments')
-
-for post_id in tqdm(post_data):
-
-    comment_data_list = []
-
-    num_comment = 1
-    
-    for comment in r.submission(id = post_id).comments.list():
-        
-        if 't3' in comment.parent_id:
-            toplevel = 1
-        else:
-            toplevel = 0
-        
-        comment_data = [comment.id,
-                        comment.parent_id,
-                        comment.created_utc,
-                        comment.body_html,
-                        toplevel,
-                        comment.distinguished,
-                        comment.edited,
-                        comment.is_submitter,
-                        comment.score,
-                        comment.stickied,
-                        comment.author.id,
-                        comment.author.name]
-        
-        comment_data_list.append(comment_data)
-        
-    comment_data = pd.DataFrame(comment_data_list)
-    
-    var_names = ['comment_id', 'comment_parent_id',
-                 'comment_created_utc', 'comment_body',
-                 'comment_toplevel', 'comment_distinguished',
-                 'comment_edited', 'comment_is_submitter',
-                 'comment_score', 'comment_stickied',
-                 'author_id', 'author_name']
-    
-    comment_data.columns = var_names
-    
-    # save comment data for a given post
-    comment_data.to_parquet(data_path + '/comments' + f'/{post_id}.gzip', compression='gzip')
         
         
     
