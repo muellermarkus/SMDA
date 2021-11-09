@@ -69,6 +69,27 @@ for sub in subreddits:
                                  filter = ['subreddit'],
                                  metadata = True)
     
+    
+    # search posts containing term
+    gen1 = api.search_submissions(q = 'climate change', limit = None)
+    
+    query_list = ['climate change', 'natural desaster', 'green energy', 'fridays for future']
+    
+    gen2 = api.search_submissions(q = '"climate change"|"natural disaster"', limit = None,
+                                  after = start_time, 
+                                  before = end_time,
+                                  subreddit = ['worldnews', 'news'])
+    test = list(gen2)
+    
+    # scrape weekly megathreads of 'what car should i buy'
+    
+    
+    # combine calls into one generator
+    from itertools import chain
+    gen = chain(gen1, gen2, gen3)
+    
+    
+    
     # retrieve post IDs
     # later used to retrieve up-to-date data from reddit
     print("retrieve post IDs...")
