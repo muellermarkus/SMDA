@@ -53,7 +53,16 @@ api = PushshiftAPI(r)
 
 # define subreddits to scrape
 # subreddits = ['electricvehicles']
-subreddits = ['electricvehicles'] # CLIMATE DESASTERS (search for posts that include that instead?) or 'global warming', 'climate change'
+subreddits = ['electricvehicles']
+
+subreddits = ['worldnews', 'news']
+
+
+sub = 'worldnews'
+sub = 'news'
+
+sub = 'cars'
+
 
 # define time period to scrape
 start_time = int(dt.datetime(2015, 1, 1).timestamp())
@@ -71,24 +80,24 @@ for sub in subreddits:
     
     
     # search posts containing term
-    gen1 = api.search_submissions(q = 'climate change', limit = None)
+    # query_list = ['climate change', 'natural desaster', 'green energy', 'fridays for future']
     
-    query_list = ['climate change', 'natural desaster', 'green energy', 'fridays for future']
+    gen = api.search_submissions(q = '"climate change"|"natural disaster"|"green energy"', 
+                                 limit = None,
+                                 after = start_time, 
+                                 before = end_time,
+                                 subreddit = sub,
+                                 filter = ['subreddit'])
     
-    gen2 = api.search_submissions(q = '"climate change"|"natural disaster"', limit = None,
-                                  after = start_time, 
-                                  before = end_time,
-                                  subreddit = ['worldnews', 'news'])
-    test = list(gen2)
+    
+    gen = api.search_submissions(q = '"what car should I buy" + megathread', 
+                                 limit = None,
+                                 after = start_time, 
+                                 before = end_time,
+                                 subreddit = sub,
+                                 filter = ['subreddit'])
     
     # scrape weekly megathreads of 'what car should i buy'
-    
-    
-    # combine calls into one generator
-    from itertools import chain
-    gen = chain(gen1, gen2, gen3)
-    
-    
     
     # retrieve post IDs
     # later used to retrieve up-to-date data from reddit
@@ -163,7 +172,7 @@ for sub in subreddits:
 # test = pd.read_json(data_path + f'/posts/{sub}.json')
 
 
-##################################################33
+##################################################
 
 
 # check why many author ids and names missing 
@@ -179,9 +188,17 @@ for sub in subreddits:
 # load reddit credentials from separate file
 
 
+# clean data: remove automod and posts that got deleted?
+        
+# get sentiment of posts towards electric cars?
 
-        
-        
+# what about those posts that have no self-text?
+
+# should also scrape the comments? (but only for electriccars?)
+
+# should also look at r/cars to avoid bias?
+
+# what is the event?! positive sentiments towards electric cars? or just the posting of threads in general?
     
     
     
@@ -226,8 +243,6 @@ for sub in subreddits:
 # also save level of comment (top-level, second, etc.)
 submission.comments.replace_more(limit=None)
 
-
-
 submission.permalink
     
     
@@ -235,10 +250,3 @@ submission.permalink
     
     
 list(vars(submission.comments.list()[0]))
-    
-
-
-
-
-
-

@@ -24,18 +24,22 @@ r = praw.Reddit(client_id = app_id,
 # scrape all comments on previously scrape posts
 subreddits = ['electricvehicles', 'cars']
 
+
+sub = 'cars'
+
+
 for sub in subreddits:
     
     print(f"scrape comments from {sub}...")
 
-    post_data = pd.read_json(data_path + f'/posts/{sub}.json')
-    post_data = list(post_data["id"])
+    # load cached post ids
+    cache = pd.read_csv(data_path + f'/posts/{sub}_cache.csv')['0'].tolist()
 
     # check if necessary folder exist
     if not os.path.exists(data_path + f'/comments/{sub}'):
         os.makedirs(data_path + f'/comments/{sub}')
 
-    for post_id in tqdm(post_data):
+    for post_id in tqdm(cache):
 
         comment_data_list = []
 
@@ -51,6 +55,7 @@ for sub in subreddits:
                 toplevel = 1
             else:
                 toplevel = 0
+                continue # only scrape toplevel comments
             
             comment_data = [comment.id,
                             comment.parent_id,
@@ -67,12 +72,23 @@ for sub in subreddits:
                 if comment.author is None:
                     comment_data.extend([''] * 2)
                 else:
-                    print(comment.body_html)
-                    print(comment.id)
-                    if comment.author.id is None:
-                        comment_data.extend([''] * 2)
-                    else:
-                        comment_data.extend([comment.author.id, comment.author.name])
+                    # print(comment.body_html)
+                    # print(comment.id)
+                    
+                    try:
+                        if comment.author.id is None:
+                            comment_data.extend([''] * 2)
+                        else:
+                            comment_data.extend([comment.author.id, comment.author.name])
+                            
+                    # sometimes id does not exist but name
+                    except AttributeError:
+                        try: 
+                            comment_data.extend(['', comment.author.name])
+                        
+                        except AttributeError:
+                            comment_data.extend([''] * 2)
+        
             except prawcore.exceptions.NotFound:
                 comment_data.extend([''] * 2)
             
