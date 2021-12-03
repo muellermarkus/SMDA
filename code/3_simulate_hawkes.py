@@ -3,6 +3,7 @@ import pandas as pd
 import os
 import matplotlib.pyplot as plt
 import scipy.stats as st
+import scipy.optimize as opt
 
 def exp_decay(x, alpha, delta):
     '''
@@ -39,7 +40,7 @@ def homogenous_hawkes_process(lambda0, kernel, t, vT, right = False, **kargs):
     right: set True if you want get limit from the right side and account for t-T = 0
     
     """
-    kernel_sum = 0
+    kernel_sum = 0.0
     
     if right:
         time_list = np.concatenate((vT, [t]))
@@ -48,7 +49,7 @@ def homogenous_hawkes_process(lambda0, kernel, t, vT, right = False, **kargs):
         
     for T in time_list:
         kernel_sum += kernel(t-T, **kargs)
-        
+
     return lambda0 + kernel_sum
 
 
@@ -74,9 +75,7 @@ def simulate_hawkes(theta, N, T_max):
     '''
     
     # prep parameters
-    # theta[1] = theta[1] * theta[3] * theta[2] ** theta[3]
-    
-    theta[1] = theta[1] * theta[2]
+    theta[1] = theta[1] * theta[3] * theta[2] ** theta[3]
     
     # init counters and output list
     # vT = [0.25, 0.33, 0.44, 1.0, 2.0, 2.5, 2.55]
@@ -121,8 +120,26 @@ def simulate_hawkes(theta, N, T_max):
 # run simulation
 np.random.seed(1234)
 
-theta = [.1, .4, .5, .5]     # Parameters lambda, alpha-frac, delta, eta, where alpha= alpha-frac*eta*delta^eta
-N = 200
+theta = [.1, .56568, .5, .5]     # Parameters lambda, alpha-frac, delta, eta, where alpha= alpha-frac*eta*delta^eta
+vP = theta
+
+
+
+T =2.0
+alpha = theta[1] * theta[3] * theta[2] ** theta[3]
+vT = [0.0,1.0] # for my method have to remove current t from vT!
+
+homogenous_hawkes_process(theta[0], power_law_kernel, T, vT, right = True, alpha = alpha, delta = theta[2], eta = theta[3])
+
+vT = [0.0,1.0,2.0] # for charles method have to include current time in vT!
+IntensityHawkes(np.array([T]), vP, vT, right= True)
+
+
+
+
+
+
+N = 2009
 T = 10000
 
 vT_markus = simulate_hawkes(theta, N, T)
@@ -195,52 +212,34 @@ def nll(theta, vT):
     for i,T in enumerate(vT):
         
         prev_T = [time for time in vT if time < T]
-        sum_list.append(np.log(homogenous_hawkes_process(theta[0], power_law_kernel, T, prev_T, alpha = alpha, delta = theta[2], eta = theta[3])))
+        sum_list.append(np.log(homogenous_hawkes_process(theta[0], power_law_kernel, T, prev_T, right = False, alpha = alpha, delta = theta[2], eta = theta[3])))
         
-        # how to ensure assertion holds when optimizing? alpha < eta * delta ** eta
+        # this part gives the exact same results as Charles, holds to right = true and right = false
         
     sum_log_lambda = np.sum(sum_list)
-    
+
     # compute integral lambda(t)dt (compensator function)
-    last_T = vT[-1]
+    last_T = vT[-1] # can also set last_T to end of observation horizon
      
     sum_list = []
     
     for T in vT:
-        if T == last_T:
-            sum_list.append(0.0)
-        sum_part = ( 1/ ((-theta[2]) ** theta[3]) - 1/((last_T - T - theta[2]) ** theta[3])) / theta[3]
-        sum_list.append(theta[0] * last_T + alpha * sum_part)
-        
-        # problem now: last_T - Ti is zero for last observation, so taking negative number to negative exponent --> nan
-        # is T = last T in paper? or when observation period ended? e.g. could set at last_T + 1
-        
-    integral_part = np.sum(sum_list)
+        sum_part = 1.0/(theta[2] ** theta[3]) - 1.0/((last_T - T + theta[2]) ** theta[3])
+        sum_list.append(alpha/theta[3] * sum_part) 
+    
+    integral_part = theta[0]*last_T + np.sum(sum_list)
     
     nll = -(sum_log_lambda - integral_part)
     
     return nll
     
-    
-    
-from scipy.optimize import minimize, Bounds
 
-
-
-
-# adtPar= [{'name': 'l0', 'p': 1, 'trans': [0, np.inf]},
-#              {'name': 'alphaf', 'p': .2, 'trans': [0, 1]},
-#              {'name': 'delta', 'p': .5, 'trans': [0, 2]},
-#              {'name': 'eta', 'p': .5, 'trans': [0, np.inf]}]
-
-# tranform initial parameters similar to dict above
-
+theta = [.1,  0.565685424949238, .5, .5]
 
 l0 = theta[0]
 alphaf = theta[1]
 delta = theta[2]
 eta = theta[3]
-
 
 # restrict lambda to interval (0,inf)
 # right bound, < inf
@@ -260,30 +259,37 @@ eta_tr = np.log(eta - 0)
 # construct parameter vector
 theta0 = [l0_tr, alphaf_tr, delta_tr, eta_tr]
 
-
-
 # ensure parameters are transformed back when passed to lik
-def TranformBack(P_tr):
+def TransformBack(P_tr):
     l0 = np.exp(P_tr[0]) + 0 
-    aux= np.exp(theta[1]) / (1+np.exp(theta[1]))
+    aux= np.exp(P_tr[1]) / (1+np.exp(P_tr[1]))
     alphaf = (1 - 0)*aux + 0
-    aux= np.exp(theta[2]) / (1+np.exp(theta[2]))
+    aux= np.exp(P_tr[2]) / (1+np.exp(P_tr[2]))
     delta = (2 - 0)*aux + 0
     eta = np.exp(P_tr[3]) + 0
     
     return [l0, alphaf, delta, eta]
 
-TranformBack(theta0)
+test = TransformBack(theta0)
 
+alphatest = test[1] * test[3] * test[2] ** test[3]
+assert alphatest < test[3] * test[2] ** test[3]
 
-lik_func = lambda P_tr: nll(TranformBack(P_tr), vT_markus)
+lik_func = lambda P_tr: nll(TransformBack(P_tr), vT)/len(vT)
 
-
-
-lik_model = minimize(lik_func, theta0,
+lik_model = opt.minimize(lik_func, theta0,
                      method='L-BFGS-B', options={'disp': True})
 
-# assertion error!!!
+
+
+
+
+
+
+TransformBack(opt.OptimizeResult(lik_model)["x"])
+TransformBack(theta0)
+
+
 
 
 
