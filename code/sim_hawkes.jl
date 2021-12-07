@@ -10,35 +10,15 @@ using Plots
     seed::Int    = 1234
 end
 
-@with_kw struct Pars
-    λ₀::Float64             = 0.1; @assert λ₀ > 0
-    α_fraction::Float64     = 0.4; @assert α_fraction > 0 && α_fraction < 1
-    δ::Float64              = 0.5; @assert δ > 0
-    η                       = undef
-    α                       = undef
-end
-
-pars = OrderedDict(
-    :λ₀         => 0.1,
-    :α_fraction => 0.4,
-    :δ          => 0.5,
-    :η          => 0.5)
-
-
-pars = Pars(η = 0.5, α_fraction = 0.565685424949238)
-
-# specify intervals only for those variables which should be transformed
-intervals = Dict(:λ₀ => [0, Inf], :α_fraction => [0, 1],
-                 :δ => [0,2], :η => [0, Inf])
 
 """
-
+    transpars(pars, intervals; back = false)
 
 Transform parameters so that they lie in pre-specified intervals.
 
 # Inputs
-    - pars          parameters dictionary with parameter name and value pairs
-    - intervals     array of intervals
+    - pars          array of parameters
+    - intervals     array of intervals (in same order as pars)
     - back          boolean if parameters should be transformed back, default = false
 
 # Output
@@ -46,59 +26,51 @@ Transform parameters so that they lie in pre-specified intervals.
 """
 function transpars(pars, intervals; back = false)
     
-    
-    OrderedDict(type2dict(pars))
-
-    # do not use parametrs struct for these model aprameters, use ordered dict. initialize them via key value pairs?
-
-    par_dict = type2dict(pars)
-    par_tr = copy(par_dict)
+    # init list of transformed parameters
+    par_tr = []
 
     # change those parameters with provided intervals
-    for (par,value) in par_dict
-        if haskey(intervals, par)
-    
-            # get associated bounds
-            left_bound = intervals[par][1]
-            right_bound = intervals[par][2]
+    for (i,par) in enumerate(pars)
 
-            # transform variables
-            if ~back
-                if left_bound == -Inf
-                    new_value = log(-(value - right_bound))
-                elseif right_bound == Inf
-                    new_value = log(value - left_bound)
-                else
-                    aux = (value - left_bound) / (right_bound - left_bound)
-                    new_value = log(aux / (1-aux))
-                end
+        # get associated bounds
+        lower_bound = intervals[i][1]
+        upper_bound = intervals[i][2]
 
-            # transform variables back
+        # do not transform if both upper and lower bound are Inf
+        if lower_bound == -Inf && upper_bound == Inf
+            push!(par_tr, par)
+        end
+
+        # transform variables
+        if ~back
+            if lower_bound == -Inf
+                new_value = log(-(par - upper_bound))
+            elseif upper_bound == Inf
+                new_value = log(par - lower_bound)
             else
-                if left_bound == -Inf
-                    new_value = -exp(value) + right_bound
-                elseif right_bound == Inf
-                    new_value = exp(value) + left_bound
-                else
-                    aux = exp(value) / (1 + exp(value))
-                    new_value = (right_bound - left_bound) * aux + left_bound
-                end
+                aux = (par - lower_bound) / (upper_bound - lower_bound)
+                new_value = log(aux / (1-aux))
             end
 
-            # update parameter value
-            par_tr[par] = new_value
+        # transform variables back
+        else
+            if lower_bound == -Inf
+                new_value = -exp(par) + upper_bound
+            elseif upper_bound == Inf
+                new_value = exp(par) + lower_bound
+            else
+                aux = exp(par) / (1 + exp(par))
+                new_value = (upper_bound - lower_bound) * aux + lower_bound
+            end
         end
+
+        # update parameter value
+        push!(par_tr, new_value)
+
     end
 
-    # pack parameters into new Parameters struct
-    # extract defined value in order top to bottom
-    return [(key, val) for (key, val) in par_tr if val != undef]
+    return par_tr
 end
-
-
-Dict([(key, val) for (key, val) in par_tr if val != undef])
-
-
 
 
 """
@@ -154,15 +126,22 @@ function λ(λ₀::Float64, t::Float64, vT; right = false, α::Float64, δ::Floa
 
     ∑ϕ = 0.0
 
-    # provide option for computing right limit
-    if right
-        vt = vcat(vT, [t])
+    if right # complete limit from the right
+        for T in vT
+            if t-T ≥ 0
+                ∑ϕ += ϕ_exp(α, δ, t-T)
+            else
+                ∑ϕ += 0
+            end
+        end
     else
-        vt = vT
-    end
-
-    for T in vt
-        ∑ϕ += ϕ_exp(α, δ, t-T)
+        for T in vT
+            if t-T > 0 
+                ∑ϕ += ϕ_exp(α, δ, t-T)
+            else
+                ∑ϕ += 0
+            end
+        end 
     end
 
     return λ₀ + ∑ϕ
@@ -172,28 +151,26 @@ function λ(λ₀::Float64, t::Float64, vT; right = false, α::Float64, δ::Floa
 
     ∑ϕ = 0.0
 
-    # provide option for computing right limit
-    if right
-        vt = vcat(vT, [t])
+    if right # complete limit from the right
+        for T in vT
+            if t-T ≥ 0
+                ∑ϕ += ϕ_power(α, δ, η, t-T)
+            else
+                ∑ϕ += 0
+            end
+        end
     else
-        vt = vT
-    end
-
-    for T in vt
-        ∑ϕ += ϕ_power(α, δ, η, t-T)
+        for T in vT
+            if t-T > 0 
+                ∑ϕ += ϕ_power(α, δ, η, t-T)
+            else
+                ∑ϕ += 0
+            end 
+        end
     end
 
     return λ₀ + ∑ϕ
 end
-
-
-# test_results = []
-# vt = [0.5, 1.0, 2.0, 4.0, 4.5]
-# for t in vt
-#     prev_t = [T for T in vt if T < t]
-#     push!(test_results, log(λ(0.1, t, prev_t, right = true, α = 0.2, δ = 0.5, η = 0.5)))
-# end # gives same results for right = true and false
-
 
 
 """
@@ -213,11 +190,12 @@ Simulate a Hawkes process, i.e. event times.
 function sim_hawkes(simpars, pars)
 
     # convert α_fraction to alpha
-    if isnothing(pars.η)
-        θ = Pars(α = pars.α_fraction * pars.δ)
+    if length(pars) == 3
+        λ₀, α_fraction, δ = pars
+        α = α_fraction * δ
     else
-        θ = Pars(α = pars.α_fraction * pars.η * pars.δ ^ pars.η,
-            	η = pars.η)
+        λ₀, α_fraction, δ, η = pars
+        α = α_fraction * η * δ^η
     end
 
     # initialization
@@ -225,15 +203,15 @@ function sim_hawkes(simpars, pars)
     vT = []
     n_events = 0
     T = 0.0
-    exp_dist = Exponential(1/pars.λ₀)
+    exp_dist = Exponential(1/λ₀)
 
     # draw event times
-    while (n_events < simpars.N) && (T< simpars.T_max)
+    while (n_events < simpars.N) && (T < simpars.T_max)
         # set upper bound
-        if isnothing(pars.η)
-            λᵘ = λ(θ.λ₀, T, vT, right = true, α = θ.α, δ = θ.δ)
+        if length(pars) == 3
+            λᵘ = λ(λ₀, T, vT, right = true, α = α, δ = δ)
         else
-            λᵘ = λ(θ.λ₀, T, vT, right = true, α = θ.α, δ = θ.δ, η = θ.η)
+            λᵘ = λ(λ₀, T, vT, right = true, α = α, δ = δ, η = η)
         end
         
         # draw interarrival time
@@ -246,10 +224,10 @@ function sim_hawkes(simpars, pars)
         s = rand()
 
         # compute new λ(T)
-        if isnothing(pars.η)
-            λₜ = λ(θ.λ₀, T, vT, right = false, α = θ.α, δ = θ.δ)
+        if length(pars) == 3
+            λₜ = λ(λ₀, T, vT, right = false, α = α, δ = δ)
         else
-            λₜ = λ(θ.λ₀, T, vT, right = false, α = θ.α, δ = θ.δ, η = θ.η)
+            λₜ = λ(λ₀, T, vT, right = false, α = α, δ = δ, η = η)
         end
 
         # check if accept sample
@@ -261,36 +239,38 @@ function sim_hawkes(simpars, pars)
     return vT
 end
 
-
+vT = [0.5, 1.0, 2.5, 3.0]
 
 function plot_hawkes(vT, pars)
 
     # convert α_fraction to alpha
-    if isnothing(pars.η)
-        θ = Pars(α = pars.α_fraction * pars.δ)
+    if length(pars) == 3
+        λ₀, α_fraction, δ = pars
+        α = α_fraction * δ
     else
-        θ = Pars(α = pars.α_fraction * pars.η * pars.δ ^ pars.η,
-            	η = pars.η)
+        λ₀, α_fraction, δ, η = pars
+        α = α_fraction * η * δ^η
     end
 
     # generate grid
     maxT = ceil(maximum(vT))
-    t_grid = collect(LinRange(0.0, maxT, 10))
+    t_grid = collect(LinRange(0.0, maxT, 1000))
 
     # concatenate with vT
     t_grid = vcat(t_grid, vT)
     sort!(t_grid)
+    unique!(t_grid)
 
     # get intensities for events
     λ_events = []
 
-    for (i,T) in enumerate(vT)
-        prev_times = vT[begin:i-1]
+    for T in vT
+        prev_times = [time for time in vT if time ≤ T]
 
-        if isnothing(pars.η)
-            λₜ = λ(θ.λ₀, T+0.1, prev_times, right = true, α = θ.α, δ = θ.δ)
+        if length(pars) == 3
+            λₜ = λ(λ₀, T, prev_times, right = true, α = α, δ = δ)
         else
-            λₜ = λ(θ.λ₀, T+0.1, prev_times, right = true, α = θ.α, δ = θ.δ, η = θ.η)
+            λₜ = λ(λ₀, T, prev_times, right = true, α = α, δ = δ, η = η)
         end
         push!(λ_events, λₜ)
     end
@@ -298,44 +278,78 @@ function plot_hawkes(vT, pars)
     # get intensities for grid points
     λ_grid = []
 
-    for (i,T) in enumerate(t_grid)
-        prev_times = [time for time in vT if time < T]
+    for T in t_grid
+        prev_times = [time for time in vT if time ≤ T]
 
-        if isnothing(pars.η)
-            λₜ = λ(θ.λ₀, T, prev_times, right = true, α = θ.α, δ = θ.δ)
+        if length(pars) == 3
+            λₜ = λ(λ₀, T, prev_times, right = true, α = α, δ = δ)
         else
-            λₜ = λ(θ.λ₀, T, prev_times, right = true, α = θ.α, δ = θ.δ, η = θ.η)
+            λₜ = λ(λ₀, T, prev_times, right = true, α = α, δ = δ, η = η)
         end
         push!(λ_grid, λₜ)
     end
 
     # construct plot
-    gr()
     plot(t_grid, λ_grid)
     plot!(vT, λ_events, seriestype = :scatter, leg = false)
     xlabel!("time t")
     ylabel!("λ(t)")
-    annotate!(140,1.4,text("λ₀ = $(round(θ.λ₀, digits = 3)), α = $(round(θ.α, digits = 3)), δ = $(round(θ.δ, digits = 3)), η = $(round(θ.η, digits = 3))", 10))
-
-end
-
-for (i,T) in enumerate(t_grid)
-    if T in vT
-        index = findfirst(T .== vT)
-        l1 = λ_events[index]
-
-        index = findfirst(T .== t_grid)
-        l2 = λ_grid[index]
-
-        println("T = $(T), λ_event = $l1, λ_grid = $l2")
+    if length(pars) == 3
+        annotate!(140,1.4,text("λ₀ = $(round(λ₀, digits = 3)), α = $(round(α, digits = 3)), δ = $(round(δ, digits = 3))", 10))
+    else
+        annotate!(140,1.4,text("λ₀ = $(round(λ₀, digits = 3)), α = $(round(α, digits = 3)), δ = $(round(δ, digits = 3)), η = $(round(η, digits = 3))", 10))
     end
+
 end
 
+
+function nll(pars, vT)
+
+    # convert α_fraction to alpha
+    if length(pars) == 3
+        λ₀, α_fraction, δ = pars
+        α = α_fraction * δ
+    else
+        λ₀, α_fraction, δ, η = pars
+        α = α_fraction * η * δ^η
+    end
+
+    # compute sum log lambda
+    ∑logλ = 0.0
+
+    for T in vT
+        prev_T = [time for time in vT if time < T]
+        ∑logλ += log(λ(λ₀, T, prev_T, α = α, δ = δ, η = η))
+    end
+
+    # compute integral (compensator function)
+    last_T = vT[end] # can also be set to end of observation period
+    integral_part = 0.0
+
+    for T in vT
+        integral_part += (1.0 / (δ^η) - 1.0/((last_T - T + δ)^η)) * α/η
+    end
+
+    return -(∑logλ - λ₀*last_T - integral_part)
+end
 
 
 # define parameters to simulate Hawkes process
-simpars = SimulationParameters(N = 2)
-pars = Pars(λ₀ = 2.4, η = 0.5)
+simpars = SimulationParameters(N = 2000);
+
+# specify array of parameters
+# λ₀, α_fraction, δ, η
+
+λ₀ = 0.5
+α = 0.4
+δ = 0.4
+η = 0.2
+pars = [λ₀, α/(η * δ^η), δ, η]
+
+# specify intervals only for those variables, [-Inf, Inf] if no transform needed
+intervals = [[0,Inf], [0,3], [0,2], [0,Inf]]
+
+
 
 # simulate data
 vT = sim_hawkes(simpars, pars);
@@ -343,8 +357,40 @@ vT = sim_hawkes(simpars, pars);
 # plot
 plot_hawkes(vT, pars)
 
-θ.α / (0.1 + θ.δ)^(θ.η + 1)
-# at max when tau = 0, so t = T
+# estimate parameters
+using Optim
+using NLSolversBase
+using ForwardDiff
+
+f(x) = nll(transpars(x, intervals, back = true), vT)/length(vT)
+
+par0 = zeros(Float64, length(pars))
+
+
+par0 = transpars(pars, intervals, back = false)
+
+# f = TwiceDifferentiable(par0 -> nll(par0, vT)/length(vT))
+
+func= TwiceDifferentiable(pars -> f(pars), par0)
+
+func= TwiceDifferentiable(pars -> f(pars), par0; autodiff = :forward)
+
+opt = optimize(func, par0, LBFGS(), Optim.Options(show_trace = true,
+                show_every = 10, iterations = 200))
+
+transpars(Optim.minimizer(opt), intervals, back = true)
+
+# problem: cannot estimate the parameters!
+
+# what else as extension? e.g. let lambda increase incrementally over time
+
+# prep data
+
+# setup ocnditional estimation
+
+
+
+
 
 
 

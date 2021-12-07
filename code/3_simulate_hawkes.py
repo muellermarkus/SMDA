@@ -42,13 +42,17 @@ def homogenous_hawkes_process(lambda0, kernel, t, vT, right = False, **kargs):
     """
     kernel_sum = 0.0
     
-    if right:
-        time_list = np.concatenate((vT, [t]))
-    else:
-        time_list = vT.copy()
-        
-    for T in time_list:
-        kernel_sum += kernel(t-T, **kargs)
+    for T in vT:
+        if right:
+            if t-T >= 0:
+                kernel_sum += kernel(t-T, **kargs)
+            else:
+                kernel_sum += 0
+        else:
+            if t-T > 0:
+                kernel_sum += kernel(t-T, **kargs)
+            else:
+                kernel_sum += 0
 
     return lambda0 + kernel_sum
 
@@ -119,42 +123,22 @@ def simulate_hawkes(theta, N, T_max):
 
 # run simulation
 np.random.seed(1234)
-
-theta = [.1, .56568, .5, .5]     # Parameters lambda, alpha-frac, delta, eta, where alpha= alpha-frac*eta*delta^eta
-vP = theta
-
-
-
-T =2.0
-alpha = theta[1] * theta[3] * theta[2] ** theta[3]
-vT = [0.0,1.0] # for my method have to remove current t from vT!
-
-homogenous_hawkes_process(theta[0], power_law_kernel, T, vT, right = True, alpha = alpha, delta = theta[2], eta = theta[3])
-
-vT = [0.0,1.0,2.0] # for charles method have to include current time in vT!
-IntensityHawkes(np.array([T]), vP, vT, right= True)
-
-
-
-
-
-
-N = 2009
+theta = [.1, .56568, .5, .5]
+N = 5
 T = 10000
 
-vT_markus = simulate_hawkes(theta, N, T)
 
-# my numbers always start at >8, yours at >2
-# your numbers tend to have greater differences in between
+theta = [0.1, 0.4 * 0.5 * 0.5 **0.5 ,0.5, 0.5]
 
+vT = simulate_hawkes(theta, N, T)
 
 # plot 
-iN= len(vT_markus)
-iT= np.ceil(max(vT_markus))
+iN= len(vT)
+iT= np.ceil(max(vT))
 vt= np.arange(0, iT, iT/1000)
 
 # concatenate times
-vt = np.unique(np.concatenate((vt, vT_markus)))
+vt = np.unique(np.concatenate((vt, vT)))
 vt = np.sort(vt)
 
 # adjust T so that intensities for events are plotting as right limit
@@ -162,8 +146,8 @@ vt = np.sort(vt)
 
 event_intensities = []
 
-for i,T in enumerate(vT_markus):
-    prev_times = vT_markus[0:i]
+for T in vT:
+    prev_times = [time for time in vT if time <= T]
     l = homogenous_hawkes_process(theta[0], power_law_kernel, T, prev_times, right = True, alpha = theta[1], delta = theta[2], eta = theta[3])
     event_intensities.append(l)
 
@@ -171,13 +155,13 @@ for i,T in enumerate(vT_markus):
 other_intensities = []
 
 for T in vt:
-    prev_times = [time for time in vT_markus if time < T]
+    prev_times = [time for time in vT if time <= T]
     l = homogenous_hawkes_process(theta[0], power_law_kernel, T, prev_times, right = True, alpha = theta[1], delta = theta[2], eta = theta[3])
     other_intensities.append(l)
     
 plt.figure()
-plt.plot(vt, other_intensities)
-plt.plot(vT_markus, event_intensities, 'o')
+plt.plot(vt, other_intensities) # compare to using vIt, same curve, only mine has lower 'baseline' for some reason I add stuff to all values
+plt.plot(vT, event_intensities, 'o')
 
 
 # save to file
@@ -276,6 +260,8 @@ alphatest = test[1] * test[3] * test[2] ** test[3]
 assert alphatest < test[3] * test[2] ** test[3]
 
 lik_func = lambda P_tr: nll(TransformBack(P_tr), vT)/len(vT)
+
+lik_func(theta0)
 
 lik_model = opt.minimize(lik_func, theta0,
                      method='L-BFGS-B', options={'disp': True})

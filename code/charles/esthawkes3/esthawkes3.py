@@ -238,7 +238,7 @@ def LnLHawkes(vP, vT, iD= -1):
         if (iD < 0):
             vAB= [0, vT[i]] if (i == 0) else [vT[i-1], vT[i]]
             vLL[i]-= IntIntensityHawkes(vAB, vP, vT)
-            test_interval.append(IntIntensityHawkes(vAB, vP, vT))
+            # test_interval.append(IntIntensityHawkes(vAB, vP, vT))
         elif (iD == 0):
             vQ= si.quadrature(IntensityHawkes, dL, vT[i], args=(vP, vT))
             vLL[i]-= vQ[0]
@@ -356,10 +356,47 @@ def PlotHawkes(vP, vT, out= None):
     iN= len(vT)
     iT= np.ceil(max(vT))
 
-    vt= np.arange(0, iT, iT/1000)               # Get a grid
+    vt= np.arange(0.1, iT, iT/1000)               # Get a grid
     vt= np.unique(np.concatenate((vt, vT)))     # Add observations to the grid
     vIt= IntensityHawkes(vt, vP, vT, right= True)
-    vITr= IntensityHawkes(vT, vP, vT, right= True)
+    
+    
+    
+    
+    
+    # TESTING
+    
+    vP= [.1, .2, .5, .5]     # Parameters lambda, alpha, delta, eta, where alpha= alpha-frac*delta
+    
+    theta = vP.copy() # for my implementation
+    (dL, dA, dD, dE)= vP
+    dAf= dA/(dE*(dD**dE))
+    vP= [dL, dAf, dD, dE] # for charles
+    
+    # check other intensities
+    vIt - np.array(other_intensities)
+    np.sum(vIt - np.array(other_intensities))
+    
+    # check event intensities
+    vITr - np.array(event_intensities)
+    
+    
+    
+    
+    
+    
+    vT = [0.5, 1.0, 2.0, 3.0]
+    
+    T = 2.0
+    
+    vT = np.array(vT)
+    
+    IntensityHawkes(T,vP,vT, right = False)
+    
+    prev_times = [time for time in vT if time < T]
+    homogenous_hawkes_process(theta[0], power_law_kernel, T, prev_times, right = True, alpha = theta[1], delta = theta[2], eta = theta[3])
+    
+    
 
     plt.figure()
     plt.plot(vt, vIt)
