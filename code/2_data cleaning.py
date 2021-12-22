@@ -156,12 +156,6 @@ search_general = ['electric', 'hybrid', 'environment'] # also matched electrical
 # load cached post ids of megathreads in cars subreddit
 cache = pd.read_csv(data_path + f'/posts/cars_cache.csv')['0'].tolist()
 
-
-
-
-
-# CHANGE THIS: ONLY TAKE INTO ACCOUNT COMMENT TIME FOR THOSE MENTION AT LEAST ONE OF THE WORDS ABOVE!
-
 # init lists
 comment_dfs = []
 post_data_list = []
@@ -246,6 +240,9 @@ for data in [df, comment_df]:
 # create sum of word occurrences
 df['sum'] = df.iloc[:, 0:len(df.columns)-1].sum(axis=1)
 
+# save data frame
+comment_df.to_parquet(data_path + '/processed/carcomments.gzip', compression = 'gzip')
+
 # check distribution
 plt.plot(df['date'], df['hybrid'])
 
@@ -254,3 +251,6 @@ plt.plot(df['date'], df['tesla'])
 plt.plot(df['date'], df['electric'])
 
 plt.plot(df['date'], df['sum'])
+
+
+# make plots for paper
