@@ -1,14 +1,10 @@
 import pandas as pd
+import numpy as np
 import os
 import datetime as dt
 import re
 from bs4 import BeautifulSoup as bs
 import matplotlib.pyplot as plt
-
-
-
-# how many hours to round to
-num_hours = 1
 
 def prep_df(file_name, data_path, score_lb = 1, num_hours = 1):
 
@@ -53,7 +49,7 @@ def prep_df(file_name, data_path, score_lb = 1, num_hours = 1):
     df = df[keep_vars]
 
     # round the date to hours
-    df.loc[:,'date'] = df['date'].round(f'{num_hours}h')
+    df.loc[:,'date'] = df['date'].round(f'{num_hours}H')
 
     # collect means, sums and post counts
     mean_df = df.groupby('date').mean()
@@ -71,50 +67,66 @@ def prep_df(file_name, data_path, score_lb = 1, num_hours = 1):
     # make date a separate column
     df.reset_index(level=0, inplace=True)
     
-    # construct time differences to previous post
-    time_diffs = [df.loc[i, 'date'] - df.loc[i-1, 'date'] for i in range(1, df.shape[0])]
-
-    # set initial post to time = 0
-    time_diffs = [pd.to_timedelta(0)] + time_diffs
-
-    # include in df
-    df['time_diff'] = time_diffs
+    # set T relative to start of observational window in minutes
+    df.loc[:,'date'] = (df['date'] - start_time).astype('timedelta64[m]')
     
-    # convert time differences to hours
-    df.loc[:, 'time_diff'] = df['time_diff'].dt.seconds/60/60
+    # make time in num_hours intervals
+    df.loc[:,'date'] = df['date']/(num_hours*60)
     
     # save data
     df.to_parquet(data_path + f'/processed/{file_name}_cleaned.gzip', compression = 'gzip')
-    print('f{file_name} cleaned and new dataframe saved')
+    print(f'{file_name} cleaned and new dataframe saved')
     
     return df
 
-# what time unit to use? we have at least one post per day, so there is no variation, the older the subreddit, the more users post, the less variation in greater time units, e.g. one post every hour?
-# somehow select subset of posts, i.e. that contain certain words? or with self.text? 
-
-# inverse weight scores etc. by subscriber count at that date (data not available)
-
-# could also look at sentiment of post titles on climate change and how the average sentiment changes over time
-
-
-
-
-
+#################################################################################
 
 # define data path
 data_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
 
+# define files to clean
 file_names = ['electricvehicles', 'news', 'worldnews']
 
+# prepare dataframes
 for file_name in file_names:
-    df = prep_df(file_name, data_path, score_lb = 1, num_hours = 1)
+    df = prep_df(file_name, data_path, score_lb = 1, num_hours = 0.25)
+    
+# combine worldnews and news data
+file_name = 'news'
+news = pd.read_parquet(data_path + f'/processed/{file_name}_cleaned.gzip') 
+file_name = 'worldnews'
+worldnews = pd.read_parquet(data_path + f'/processed/{file_name}_cleaned.gzip') 
 
-    
-    
-# 15min
-    
+df = pd.concat([news, worldnews])
+df.reset_index(inplace=True, drop=True)
+df.sort_values(by = 'date')
+sum(df.duplicated('date')) # 130
+
+# remove duplicates for now
+df = df[~df.duplicated('date')]
+
+# select columns
+df = df[['date']]
+
+# save dataframe
+df.to_parquet(data_path + '/processed/disasters.gzip', compression = 'gzip')
+
+# prepare electricvehicles data
+file_name = 'electricvehicles'
+df = pd.read_parquet(data_path + f'/processed/{file_name}_cleaned.gzip') 
+
+# remove duplicates for now
+df = df[~df.duplicated('date')]
+
+# select columns
+df = df[['date']]
+
+# save dataframe
+df.to_parquet(data_path + '/processed/electricvehicles.gzip', compression = 'gzip')
+
+#################################################################################
+
 # check distributions
-
 file_name = 'electricvehicles'
 file_name = 'news'
 file_name = 'worldnews'
@@ -122,9 +134,6 @@ df = pd.read_parquet(data_path + f'/processed/{file_name}_cleaned.gzip')
 plt.plot(df['date'], df['post_count'])
 
 # see coincidence in 2017!
-
-   
-
 
 # clean comments of car subreddit (weekly megathread)
 
@@ -144,11 +153,17 @@ def comment_cleaner(body):
 search_models = ['model 3', 'model s', 'model x', 'model y', 'tesla', 'phev', 'ev', 'mhev', 'shev', 'bev', 'fchev'] #e-tron? can add to car models
 search_general = ['electric', 'hybrid', 'environment'] # also matched electrical, environmental, etc.
 
-
 # load cached post ids of megathreads in cars subreddit
 cache = pd.read_csv(data_path + f'/posts/cars_cache.csv')['0'].tolist()
 
-# init list
+
+
+
+
+# CHANGE THIS: ONLY TAKE INTO ACCOUNT COMMENT TIME FOR THOSE MENTION AT LEAST ONE OF THE WORDS ABOVE!
+
+# init lists
+comment_dfs = []
 post_data_list = []
 
 for post_id in cache:
@@ -200,7 +215,11 @@ for post_id in cache:
         
     # combine dictionaries to dataframe
     comment_df = pd.DataFrame(comment_data_list)
-    # comment_df.describe()
+    save_df = pd.concat([df['date'].reset_index(drop = True), comment_df.sum(axis = 1)], axis=1)
+    save_df.columns = ['date', 'ev_mention']
+    # construct dummy = 1 if comment mentions electricvehicle (model or general word above)
+    save_df['ev_mention'] = np.where(save_df['ev_mention'] > 0, 1, 0)
+    comment_dfs.append(save_df)
 
     # sum over comments
     post_data = comment_df.sum(axis = 0).to_dict()  
@@ -213,11 +232,16 @@ for post_id in cache:
 df = pd.DataFrame(post_data_list)
 df.describe()
 
-# round the date to hours
-df.loc[:,'date'] = df['date'].round(f'{num_hours}h')
+# create dataframe on comment level
+comment_df = pd.concat(comment_dfs)
 
-# sort df
-df.sort_values('date', inplace = True, ignore_index=True)
+# keep only those comments which mention EVs
+comment_df = comment_df[comment_df['ev_mention'] == 1] # STARTS ONLY IN 2016!!!
+
+for data in [df, comment_df]:
+    data.loc[:,'date'] = (data['date'] - start_time).astype('timedelta64[m]')
+    data.loc[:,'date'] = data['date']/(0.25*60)
+    data.sort_values('date', inplace = True, ignore_index=True)
 
 # create sum of word occurrences
 df['sum'] = df.iloc[:, 0:len(df.columns)-1].sum(axis=1)
@@ -230,23 +254,3 @@ plt.plot(df['date'], df['tesla'])
 plt.plot(df['date'], df['electric'])
 
 plt.plot(df['date'], df['sum'])
-
-# current caveats
-# only if before these words there is not a 'not'
-# electric may not relate vehicle
-
-# compare subreddits in terms of subscribers by comparing to trends, eg in new posts, in more general subreddits
-
-
-# start with univariate hawkes processes
-
-
-# generate hawkes process and simulate data
-# set up ML to reestimate parameters used in simulations
-# only if that works go
-# SHOW HIM THE DATA FOR SIMULATED HAWKES PROCESS!!! SEND HIM ONCE I HAVE SOMETHING
-
-# poisson / hawkes
-# relate parameter lambda to x variables (also include variables of other subreddits) lambda = exp(Xbeta)
-# generalized autoregressive scores: looks at each likelihood contribution: would this be better if I increase the lambda bit; could also model tri-variate poisson process, 3 lambdas, each of those adapts to other likelihood contributions as well.
-

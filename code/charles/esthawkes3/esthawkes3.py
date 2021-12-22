@@ -217,7 +217,7 @@ def LnLHawkes(vP, vT, iD= -1):
         vLL     iN vector of loglikelihoods
     """
     vLL= np.log(IntensityHawkes(vT, vP, vT, right= False))
-
+    
     iN= len(vT)
     dL= 0
     # i= 0
@@ -257,7 +257,9 @@ def LnLHawkes(vP, vT, iD= -1):
 
     return vLL
 
-
+# vT = np.array([0.5, 1.5, 2.5, 4.0, 5.0])
+# vP = [1.2, 0.5, 1.0]
+# LnLHawkes(vP, vT).sum()
 
 
 ###########################################################

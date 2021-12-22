@@ -8,6 +8,8 @@ using NLSolversBase
 using ForwardDiff
 using DataFrames
 using Parquet
+using LinearAlgebra
+using LineSearches
 
 @with_kw struct SimulationParameters
     N::Int       = 200
@@ -209,7 +211,7 @@ function sim_hawkes(simpars, pars)
     vT = []
     n_events = 0
     T = 0.0
-
+    
     # draw event times
     while (n_events < simpars.N) && (T < simpars.T_max)
         # set upper bound
@@ -351,21 +353,53 @@ function nll_pwr(pars, vT)
     return -(∑logλ - λ₀*last_T - integral_part)
 end
 
+function get_results(opt, func, intervals, vT, varnames; original_pars = nothing)
+    estθ = transpars(Optim.minimizer(opt), intervals, back = true)
+    # use delta method to get standard errors
+    # as I used transformed parameters
+    num_hess = -length(vT) .* hessian!(func, Optim.minimizer(opt))
+    inv_num_hess = -inv(num_hess)
+    num_jacob = ForwardDiff.jacobian(x -> transpars(x, intervals, back = true), Optim.minimizer(opt))
+    var_cov = num_jacob * inv_num_hess * transpose(num_jacob)
+    se = sqrt.(diag(var_cov))
+    ttest = estθ ./ se
+    normal_dist = Normal()
+    pval = 2*pdf.(normal_dist, -abs.(ttest))
+    if isnothing(original_pars)
+        results = DataFrame(name = varnames, estθ = estθ, se = se, ttest = ttest, pval = pval)
+    else
+        results = DataFrame(name = varnames, θ = original_pars, estθ = estθ, se = se, ttest = ttest, pval = pval)
+    end
+    return results
+end
 
+function run_optimization(par0, intervals, vT, f)
+    # define start parameters and differentiation
+    par0_tr = transpars(par0, intervals)
+    func = TwiceDifferentiable(f, par0_tr; autodiff = :forward);
+
+    # run optimizer
+    options = Optim.Options(show_trace = true, show_every = 10, iterations = 300, g_tol = 1e-5, f_tol = 2.2e-9)
+    opt = optimize(func, par0_tr, LBFGS(; linesearch = LineSearches.HagerZhang(linesearchmax = 30)), options)
+    print(opt)
+
+    return opt, func
+end
 
 # define parameters to simulate Hawkes process
 simpars = SimulationParameters(N = 6000);
 
 # specify array of parameters
-λ₀ = 1.2
-α_fraction = 0.5
-δ = 1.0
-η = 0.3
+λ₀ = 0.1
+α_fraction = 0.1
+δ = 0.8
 
-# specify intervals only for those variables, set [-Inf, Inf] if no transform needed
+# specify array of parameters and parameter names
+varnames = ["λ₀", "α_fraction", "δ"]
 pars = [λ₀, α_fraction, δ]
+
+# specify intervals for the parameter transformations
 intervals = [[0,Inf], [0,1], [0,Inf]];
-par0 = copy(pars);
 
 # simulate data
 vT = sim_hawkes(simpars, pars);
@@ -373,51 +407,76 @@ vT = sim_hawkes(simpars, pars);
 # plot first 20 data points
 plot_hawkes(vT[begin:20], pars)
 
-# define related nll functions
+# define related nll function
 if length(pars) == 3
-    f(x) = nll_exp(transpars(x, intervals, back = true), vT);
+    f(x) = nll_exp(transpars(x, intervals, back = true), vT)/length(vT);
 else
-    f(x) = nll_pwr(transpars(x, intervals, back = true), vT);
+    f(x) = nll_pwr(transpars(x, intervals, back = true), vT)/length(vT);
 end
 
-par0_tr = transpars(par0, intervals)
+# init parameters for estimation
+par0 = copy(pars);
 
-# testing against python (gives same LL values)
-# pars = [1.2, 0.5, 1.0]
-# intervals = [[0,Inf], [0,1], [0,Inf], [0, Inf]];
-# pars0 = transpars(pars, intervals)
-# transpars(pars0, intervals, back = true)
-# vT = [1.5, 20.0, 24.2, 30.0]
-# if length(pars0) == 3
-#     f(x) = nll_exp(transpars(x, intervals, back = true), vT)/length(vT);
-# else
-#     f(x) = nll_pwr(transpars(x, intervals, back = true), vT)/length(vT);
-# end
-# f(pars0)
+opt, func = run_optimization(par0, intervals, vT, f);
 
-# check if differentiation works
-# ForwardDiff.gradient(f, par0_tr)
-func = TwiceDifferentiable(f, par0_tr; autodiff = :forward);
+results = get_results(opt, func, intervals, vT, varnames, original_pars = pars)
 
-# run optimizer
-using LineSearches
-options = Optim.Options(show_trace = true, show_every = 10, iterations = 200,
-g_tol = 1e-5, f_tol = 2.2e-9)
-opt = optimize(func, par0_tr, LBFGS(; linesearch = LineSearches.HagerZhang(linesearchmax = 20)), options)
+##########
+# ESTIMATE PARAMETERS ON CLIMATE DISASTER NEWS DATA
 
-# collect results
-DataFrame(θ = pars, Estθ = transpars(Optim.minimizer(opt), intervals, back = true))
+# load disaster data
+path = joinpath(dirname(dirname(@__FILE__)), "data", "processed", "disasters.gzip");
+df = DataFrame(read_parquet(path));
+vT = df.date;
 
+# define starting values
+par0 = [0.1, 0.01, 0.5];
 
-# works, but does not use autodiff
-opt = optimize(f, par0_tr, LBFGS(), 
-Optim.Options(show_trace = true, show_every = 10, iterations = 200))
-DataFrame(θ = pars, Estθ = transpars(Optim.minimizer(opt), intervals, back = true))
+# define related nll function
+if length(pars) == 3
+    f(x) = nll_exp(transpars(x, intervals, back = true), vT)/length(vT);
+else
+    f(x) = nll_pwr(transpars(x, intervals, back = true), vT)/length(vT);
+end
 
+# one run
+opt, func = run_optimization(par0, intervals, vT, f)
+results = get_results(opt, func, intervals, vT, varnames)
 
+# output to latex
+using Latexify
+latexify(results, env=:table, fmt="%.3f")
 
-
+# plot results
+plot_hawkes(vT[begin:100], transpars(Optim.minimizer(opt), intervals, back = true))
 
 
 
+
+##########
+# ROBUSTNESS CHECK (vary initial guess)
+
+optlist = []
+parlist = []
+funclist = []
+
+# create grid of value to optimize over
+pargrid = Iterators.product(range(0.1, 2.0, 10), range(0.1, 0.9, 10), range(0.1, 5.0, 10))
+
+for par0 in pargrid
+    println("optimize using $par0")
+    try
+        opt, func = run_optimization(par0, intervals, vT, f)
+    catch
+        opt, func = ["error", "error"]
+    end
+
+    push!(optlist, opt)
+    push!(parlist, par0)
+    push!(funclist, func)
+end
+
+
+
+get_results(optlist[1], funclist[1], intervals, vT, varnames)
 

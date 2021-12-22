@@ -8,6 +8,8 @@ using NLSolversBase
 using ForwardDiff
 using DataFrames
 using Parquet
+using LinearAlgebra
+using LineSearches
 
 @with_kw struct SimulationParameters
     N::Int       = 200
@@ -127,7 +129,7 @@ If η is specified, use power-law kernel.
 # Output
         λ(t)        the intensity of the Hawkes process at time t
 """
-function λ_exp(λ₀, t, vT; right = false, α, δ)
+function λ_exp(λ₀, λ₁, t, vT; right = false, α, δ)
 
     ∑ϕ = 0.0
 
@@ -149,12 +151,12 @@ function λ_exp(λ₀, t, vT; right = false, α, δ)
         end
     end
 
-    return λ₀ + ∑ϕ
+    return λ₀ + λ₁*t + ∑ϕ
 end
 
 
 
-function λ_pwr(λ₀, t, vT; right = false, α, δ, η)
+function λ_pwr(λ₀, λ₁, t, vT; right = false, α, δ, η)
 
     ∑ϕ = 0.0
 
@@ -176,7 +178,7 @@ function λ_pwr(λ₀, t, vT; right = false, α, δ, η)
         end
     end
 
-    return λ₀ + ∑ϕ
+    return λ₀ + λ₁*t + ∑ϕ
 end
 
 """
@@ -196,13 +198,16 @@ Simulate a Hawkes process, i.e. event times.
 function sim_hawkes(simpars, pars)
 
     # convert α_fraction to alpha
-    if length(pars) == 3
-        λ₀, α_fraction, δ = pars
+    if length(pars) == 4
+        λ₀, λ₁_fraction, α_fraction, δ = pars
         α = α_fraction * δ
     else
-        λ₀, α_fraction, δ, η = pars
+        λ₀, λ₁_fraction, α_fraction, δ, η = pars
         α = α_fraction * η * δ^η
     end
+
+    # scale lambda1 as fraction of lambda0 that trend increases over a year
+    λ₁ = λ₀ * λ₁_fraction  / (365 * 24 * 4)
 
     # initialization
     Random.seed!(simpars.seed)
@@ -213,10 +218,10 @@ function sim_hawkes(simpars, pars)
     # draw event times
     while (n_events < simpars.N) && (T < simpars.T_max)
         # set upper bound
-        if length(pars) == 3
-            λᵘ = λ_exp(λ₀, T, vT, right = true, α = α, δ = δ)
+        if length(pars) == 4
+            λᵘ = λ_exp(λ₀, λ₁, T, vT, right = true, α = α, δ = δ)
         else
-            λᵘ = λ_pwr(λ₀, T, vT, right = true, α = α, δ = δ, η = η)
+            λᵘ = λ_pwr(λ₀, λ₁, T, vT, right = true, α = α, δ = δ, η = η)
         end
 
         # draw interarrival time
@@ -230,10 +235,10 @@ function sim_hawkes(simpars, pars)
         s = rand()
 
         # compute new λ(T)
-        if length(pars) == 3
-            λₜ = λ_exp(λ₀, T, vT, right = false, α = α, δ = δ)
+        if length(pars) == 4
+            λₜ = λ_exp(λ₀, λ₁, T, vT, right = false, α = α, δ = δ)
         else
-            λₜ = λ_pwr(λ₀, T, vT, right = false, α = α, δ = δ, η = η)
+            λₜ = λ_pwr(λ₀, λ₁, T, vT, right = false, α = α, δ = δ, η = η)
         end
 
         # check if accept sample
@@ -248,13 +253,16 @@ end
 function plot_hawkes(vT, pars)
 
     # convert α_fraction to alpha
-    if length(pars) == 3
-        λ₀, α_fraction, δ = pars
+    if length(pars) == 4
+        λ₀, λ₁_fraction, α_fraction, δ = pars
         α = α_fraction * δ
     else
-        λ₀, α_fraction, δ, η = pars
+        λ₀, λ₁_fraction, α_fraction, δ, η = pars
         α = α_fraction * η * δ^η
     end
+
+    # scale lambda1 as fraction of lambda0 that trend increases over a year
+    λ₁ = λ₀ * λ₁_fraction / (365 * 24 * 4)
 
     # generate grid
     maxT = ceil(maximum(vT))
@@ -270,10 +278,10 @@ function plot_hawkes(vT, pars)
 
     for T in vT
         prev_times = [time for time in vT if time ≤ T]
-        if length(pars) == 3
-            λₜ = λ_exp(λ₀, T, prev_times, right = true, α = α, δ = δ)
+        if length(pars) == 4
+            λₜ = λ_exp(λ₀, λ₁, T, prev_times, right = true, α = α, δ = δ)
         else
-            λₜ = λ_pwr(λ₀, T, prev_times, right = true, α = α, δ = δ, η = η)
+            λₜ = λ_pwr(λ₀, λ₁, T, prev_times, right = true, α = α, δ = δ, η = η)
         end
         push!(λ_events, λₜ)
     end
@@ -283,10 +291,10 @@ function plot_hawkes(vT, pars)
 
     for T in t_grid
         prev_times = [time for time in vT if time ≤ T]
-        if length(pars) == 3
-            λₜ = λ_exp(λ₀, T, prev_times, right = true, α = α, δ = δ)
+        if length(pars) == 4
+            λₜ = λ_exp(λ₀, λ₁, T, prev_times, right = true, α = α, δ = δ)
         else
-            λₜ = λ_pwr(λ₀, T, prev_times, right = true, α = α, δ = δ, η = η)
+            λₜ = λ_pwr(λ₀, λ₁, T, prev_times, right = true, α = α, δ = δ, η = η)
         end
         push!(λ_grid, λₜ)
     end
@@ -296,7 +304,7 @@ function plot_hawkes(vT, pars)
     plot!(vT, λ_events, seriestype = :scatter, leg = false)
     xlabel!("time t")
     ylabel!("λ(t)")
-    if length(pars) == 3
+    if length(pars) == 4
         annotate!(140,1.4,text("λ₀ = $(round(λ₀, digits = 3)), α = $(round(α, digits = 3)), δ = $(round(δ, digits = 3))", 10))
     else
         annotate!(140,1.4,text("λ₀ = $(round(λ₀, digits = 3)), α = $(round(α, digits = 3)), δ = $(round(δ, digits = 3)), η = $(round(η, digits = 3))", 10))
@@ -311,21 +319,28 @@ function nll_exp(pars, vT)
     integral_part = 0.0
 
     # construct alpha parameter
-    λ₀, α_fraction, δ = pars
+    λ₀, λ₁_fraction , α_fraction, δ = pars
     α = α_fraction * δ
+
+    # scale lambda1 as fraction of lambda0 that trend increases over a year
+    λ₁ = λ₀ * λ₁_fraction  / (365 * 24 * 4)
 
     # compute sum log lambda
     for T in vT
         prev_T = [time for time in vT if time < T]
-        ∑logλ += log(λ_exp(λ₀, T, prev_T, α = α, δ = δ))
-    end
+        # keep last 300 events
+        # if length(prev_T) > 300
+        #     prev_T = prev_T[end-300:end]
+        # end
+        ∑logλ += log(λ_exp(λ₀, λ₁, T, prev_T, α = α, δ = δ))
+    end 
 
     # compute integral (compensator function)
     for T in vT
         integral_part += α/δ * (1-exp(-δ*(last_T - T)))
     end
 
-    return -(∑logλ - λ₀*last_T - integral_part)
+    return -(∑logλ - λ₀*last_T - λ₁*(last_T^2)/2- integral_part)
 end
 
 function nll_pwr(pars, vT)
@@ -334,13 +349,20 @@ function nll_pwr(pars, vT)
     integral_part = 0.0
 
     # construct alpha parameter
-    λ₀, α_fraction, δ, η = pars
+    λ₀, λ₁, α_fraction, δ, η = pars
     α = α_fraction * η * δ^η
+
+    # scale lambda1 as fraction of lambda0 that trend increases over a year
+    λ₁ = λ₀ * λ₁_fraction  / (365 * 24 * 4)
 
     # compute sum log lambda
     for T in vT
         prev_T = [time for time in vT if time < T]
-        ∑logλ += log(λ_pwr(λ₀, T, prev_T, α = α, δ = δ, η = η))
+        # keep last 300 events
+        # if length(prev_T) > 300
+        #     prev_T = prev_T[end-300:end]
+        # end
+        ∑logλ += log(λ_pwr(λ₀, λ₁, T, prev_T, α = α, δ = δ, η = η))
     end
 
     # compute integral (compensator function)
@@ -348,24 +370,28 @@ function nll_pwr(pars, vT)
         integral_part += (1.0 / (δ^η) - 1.0/((last_T - T + δ)^η)) * α/η
     end
 
-    return -(∑logλ - λ₀*last_T - integral_part)
+    return -(∑logλ - λ₀*last_T - λ₁*(last_T^2)/2 - integral_part)
 end
 
 
+####################################################################
 
 # define parameters to simulate Hawkes process
 simpars = SimulationParameters(N = 6000);
 
-# specify array of parameters
+# specify parameters
 λ₀ = 1.2
+λ₁_fraction = 0.01
 α_fraction = 0.5
-δ = 1.0
-η = 0.3
+δ = 0.5
 
-# specify intervals only for those variables, set [-Inf, Inf] if no transform needed
-pars = [λ₀, α_fraction, δ]
-intervals = [[0,Inf], [0,1], [0,Inf]];
-par0 = copy(pars);
+# specify array of parameters and parameter names
+varnames = ["λ₀", "λ₁_fraction", "α_fraction", "δ"]
+pars = [λ₀, λ₁_fraction, α_fraction, δ]
+
+# specify intervals for transformation of parameters
+intervals = [[0,Inf], [0,1], [0,1], [0,Inf]];
+par0 = pars;
 
 # simulate data
 vT = sim_hawkes(simpars, pars);
@@ -373,51 +399,83 @@ vT = sim_hawkes(simpars, pars);
 # plot first 20 data points
 plot_hawkes(vT[begin:20], pars)
 
-# define related nll functions
-if length(pars) == 3
-    f(x) = nll_exp(transpars(x, intervals, back = true), vT);
+# define related nll function
+if length(pars) == 4
+    f(x) = nll_exp(transpars(x, intervals, back = true), vT)/length(vT);
 else
-    f(x) = nll_pwr(transpars(x, intervals, back = true), vT);
+    f(x) = nll_pwr(transpars(x, intervals, back = true), vT)/length(vT);
 end
 
-par0_tr = transpars(par0, intervals)
+function get_results(opt, func, intervals, vT, varnames; original_pars = nothing)
+    estθ = transpars(Optim.minimizer(opt), intervals, back = true)
+    # use delta method to get standard errors
+    # as I used transformed parameters
+    num_hess = -length(vT) .* hessian!(func, Optim.minimizer(opt))
+    inv_num_hess = -inv(num_hess)
+    num_jacob = ForwardDiff.jacobian(x -> transpars(x, intervals, back = true), Optim.minimizer(opt))
+    var_cov = num_jacob * inv_num_hess * transpose(num_jacob)
+    se = sqrt.(diag(var_cov))
+    ttest = estθ ./ se
+    normal_dist = Normal()
+    pval = 2*pdf.(normal_dist, -abs.(ttest))
+    if isnothing(original_pars)
+        results = DataFrame(name = varnames, estθ = estθ, se = se, ttest = ttest, pval = pval)
+    else
+        results = DataFrame(name = varnames, θ = original_pars, estθ = estθ, se = se, ttest = ttest, pval = pval)
+    end
+    return results
+end
 
-# testing against python (gives same LL values)
-# pars = [1.2, 0.5, 1.0]
-# intervals = [[0,Inf], [0,1], [0,Inf], [0, Inf]];
-# pars0 = transpars(pars, intervals)
-# transpars(pars0, intervals, back = true)
-# vT = [1.5, 20.0, 24.2, 30.0]
-# if length(pars0) == 3
-#     f(x) = nll_exp(transpars(x, intervals, back = true), vT)/length(vT);
-# else
-#     f(x) = nll_pwr(transpars(x, intervals, back = true), vT)/length(vT);
-# end
-# f(pars0)
+function run_optimization(par0, intervals, vT, f)
+    # define start parameters and differentiation
+    par0_tr = transpars(par0, intervals)
+    func = TwiceDifferentiable(f, par0_tr; autodiff = :forward);
 
-# check if differentiation works
-# ForwardDiff.gradient(f, par0_tr)
-func = TwiceDifferentiable(f, par0_tr; autodiff = :forward);
+    # run optimizer
+    options = Optim.Options(show_trace = true, show_every = 10, iterations = 300, g_tol = 1e-5, f_tol = 2.2e-9)
+    opt = optimize(func, par0_tr, LBFGS(; linesearch = LineSearches.HagerZhang(linesearchmax = 30)), options)
+    print(opt)
 
-# run optimizer
-using LineSearches
-options = Optim.Options(show_trace = true, show_every = 10, iterations = 200,
-g_tol = 1e-5, f_tol = 2.2e-9)
-opt = optimize(func, par0_tr, LBFGS(; linesearch = LineSearches.HagerZhang(linesearchmax = 20)), options)
+    return opt, func
+end
 
-# collect results
-DataFrame(θ = pars, Estθ = transpars(Optim.minimizer(opt), intervals, back = true))
+opt, func = run_optimization(par0, intervals, vT, f);
+
+results = get_results(opt, func, intervals, vT, varnames, original_pars = pars)
+
+# plot results
+plot_hawkes(vT[begin:20], results[!, :θ])
 
 
-# works, but does not use autodiff
-opt = optimize(f, par0_tr, LBFGS(), 
-Optim.Options(show_trace = true, show_every = 10, iterations = 200))
-DataFrame(θ = pars, Estθ = transpars(Optim.minimizer(opt), intervals, back = true))
+##########
+# ESTIMATE PARAMETERS ON CLIMATE DISASTER NEWS DATA
+
+# load disaster data
+path = joinpath(dirname(dirname(@__FILE__)), "data", "processed", "disasters.gzip");
+df = DataFrame(read_parquet(path));
+vT = df.date;
+
+# define starting values
+par0 = [0.1, 0.01, 0.5, 0.5]
+
+# define negative log likelihood function
+if length(par0) == 4
+    f(x) = nll_exp(transpars(x, intervals, back = true), vT)/length(vT);
+else
+    f(x) = nll_pwr(transpars(x, intervals, back = true), vT)/length(vT);
+end
+
+# one run
+opt, func = run_optimization(par0, intervals, vT, f)
+results = get_results(opt, func, intervals, vT, varnames)
+
+# output to latex
+using Latexify
+latexify(results, env=:table, fmt="%.3f")
 
 
 
+# results are virtually zero for the time trend
 
-
-
-
+# results seem to be sensitive with regards to lambda1, initial guess should not be to far off, otherwise singular cov matrix
 
