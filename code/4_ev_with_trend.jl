@@ -443,10 +443,10 @@ plot_hawkes(vT[begin:20], results[!, :θ])
 
 
 ##########
-# ESTIMATE PARAMETERS ON CLIMATE DISASTER NEWS DATA
+# ESTIMATE PARAMETERS ON EV DATA
 
 # load disaster data
-path = joinpath(dirname(dirname(@__FILE__)), "data", "processed", "disasters.gzip");
+path = joinpath(dirname(dirname(@__FILE__)), "data", "processed", "electricvehicles.gzip");
 df = DataFrame(read_parquet(path));
 vT = df.date;
 

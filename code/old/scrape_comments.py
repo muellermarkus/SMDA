@@ -6,10 +6,10 @@ import prawcore
 import datetime as dt
 
 # define credentials
-reddit_username = 'Doxxton'
-reddit_pw = 'paradoxx1'
-app_id = 'Fb7jNz6yHgK9HloByAVBdA'
-app_secret = 'fg3yVGPWVQh7VPnmv7iHWuQn6a4w-w'
+reddit_username = ''
+reddit_pw = ''
+app_id = ''
+app_secret = ''
 
 # define data path
 data_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')

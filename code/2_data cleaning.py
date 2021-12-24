@@ -128,12 +128,35 @@ df.to_parquet(data_path + '/processed/electricvehicles.gzip', compression = 'gzi
 
 # check distributions
 file_name = 'electricvehicles'
+df_ev = pd.read_parquet(data_path + f'/processed/{file_name}_cleaned.gzip')    
 file_name = 'news'
+df_news = pd.read_parquet(data_path + f'/processed/{file_name}_cleaned.gzip')    
+plt.plot(df['date'], df['post_count'])
 file_name = 'worldnews'
-df = pd.read_parquet(data_path + f'/processed/{file_name}_cleaned.gzip')    
+df_wnews = pd.read_parquet(data_path + f'/processed/{file_name}_cleaned.gzip')    
 plt.plot(df['date'], df['post_count'])
 
-# see coincidence in 2017!
+# combine news and worldnews data
+df_plot = pd.concat([df_news, df_wnews]).groupby('date').sum()
+df_plot.reset_index(level=0, inplace=True)
+
+# prepare figure save path
+fig_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'output')
+
+fig = plt.figure(figsize=(10, 4))
+plt.subplot(1, 2, 1)
+plt.plot(df_plot['date'], df_plot['post_count'])
+plt.title('Climate Change Data')
+plt.xlabel('time in 15 min intervals')
+plt.ylabel('number of posts')
+
+plt.subplot(1, 2, 2)
+plt.plot(df_ev['date'], df_ev['post_count'])
+plt.title('Electric Vehicles (EV) Data')
+plt.xlabel('time in 15 min intervals')
+plt.ylabel('number of posts')
+
+plt.savefig(fig_path + '/dataplot.png', dpi = 300)
 
 # clean comments of car subreddit (weekly megathread)
 
@@ -149,9 +172,8 @@ def comment_cleaner(body):
         
     return body
 
-
-search_models = ['model 3', 'model s', 'model x', 'model y', 'tesla', 'phev', 'ev', 'mhev', 'shev', 'bev', 'fchev'] #e-tron? can add to car models
-search_general = ['electric', 'hybrid', 'environment'] # also matched electrical, environmental, etc.
+search_models = ['model 3', 'model s', 'model x', 'model y', 'tesla', 'phev', 'ev', 'mhev', 'shev', 'bev', 'fchev']
+search_general = ['electric', 'hybrid', 'environment'] # also matches electrical, environmental, etc.
 
 # load cached post ids of megathreads in cars subreddit
 cache = pd.read_csv(data_path + f'/posts/cars_cache.csv')['0'].tolist()
@@ -230,7 +252,7 @@ df.describe()
 comment_df = pd.concat(comment_dfs)
 
 # keep only those comments which mention EVs
-comment_df = comment_df[comment_df['ev_mention'] == 1] # STARTS ONLY IN 2016!!!
+comment_df = comment_df[comment_df['ev_mention'] == 1] # starts only in 2016
 
 for data in [df, comment_df]:
     data.loc[:,'date'] = (data['date'] - start_time).astype('timedelta64[m]')
@@ -240,10 +262,7 @@ for data in [df, comment_df]:
 # create sum of word occurrences
 df['sum'] = df.iloc[:, 0:len(df.columns)-1].sum(axis=1)
 
-# save data frame
-comment_df.to_parquet(data_path + '/processed/carcomments.gzip', compression = 'gzip')
-
-# check distribution
+# check distribution of EV mentions
 plt.plot(df['date'], df['hybrid'])
 
 plt.plot(df['date'], df['tesla'])
@@ -251,6 +270,3 @@ plt.plot(df['date'], df['tesla'])
 plt.plot(df['date'], df['electric'])
 
 plt.plot(df['date'], df['sum'])
-
-
-# make plots for paper

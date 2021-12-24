@@ -10,6 +10,7 @@ using DataFrames
 using Parquet
 using LinearAlgebra
 using LineSearches
+using DelimitedFiles
 
 @with_kw struct SimulationParameters
     N::Int       = 200
@@ -46,6 +47,7 @@ function transpars(pars, intervals; back = false)
         # do not transform if both upper and lower bound are Inf
         if lower_bound == -Inf && upper_bound == Inf
             push!(par_tr, par)
+            continue
         end
 
         # transform variables
@@ -296,14 +298,8 @@ function plot_hawkes(vT, pars)
     # construct plot
     plot(t_grid, λ_grid)
     plot!(vT, λ_events, seriestype = :scatter, leg = false)
-    xlabel!("time t")
+    xlabel!("time t (15 min intervals)")
     ylabel!("λ(t)")
-    if length(pars) == 3
-        annotate!(140,1.4,text("λ₀ = $(round(λ₀, digits = 3)), α = $(round(α, digits = 3)), δ = $(round(δ, digits = 3))", 10))
-    else
-        annotate!(140,1.4,text("λ₀ = $(round(λ₀, digits = 3)), α = $(round(α, digits = 3)), δ = $(round(δ, digits = 3)), η = $(round(η, digits = 3))", 10))
-    end
-
 end
 
 
@@ -430,10 +426,10 @@ df = DataFrame(read_parquet(path));
 vT = df.date;
 
 # define starting values
-par0 = [0.1, 0.01, 0.5];
+par0 = [0.1, 0.5, 0.5];
 
 # define related nll function
-if length(pars) == 3
+if length(par0) == 3
     f(x) = nll_exp(transpars(x, intervals, back = true), vT)/length(vT);
 else
     f(x) = nll_pwr(transpars(x, intervals, back = true), vT)/length(vT);
@@ -443,6 +439,9 @@ end
 opt, func = run_optimization(par0, intervals, vT, f)
 results = get_results(opt, func, intervals, vT, varnames)
 
+# save parameters
+climate_pars = transpars(Optim.minimizer(opt), intervals, back = true)
+
 # output to latex
 using Latexify
 latexify(results, env=:table, fmt="%.3f")
@@ -450,33 +449,104 @@ latexify(results, env=:table, fmt="%.3f")
 # plot results
 plot_hawkes(vT[begin:100], transpars(Optim.minimizer(opt), intervals, back = true))
 
-
-
+# save figure
+path = joinpath(dirname(dirname(@__FILE__)), "output", "climate_plot.png")
+savefig(path)
 
 ##########
 # ROBUSTNESS CHECK (vary initial guess)
 
-optlist = []
-parlist = []
-funclist = []
+# optlist = []
+# parlist = []
+# funclist = []
 
-# create grid of value to optimize over
-pargrid = Iterators.product(range(0.1, 2.0, 10), range(0.1, 0.9, 10), range(0.1, 5.0, 10))
+# # create grid of value to optimize over
+# pargrid = Iterators.product(range(0.1, 1.0, 5), range(0.1, 0.9, 5), range(0.1, 2.0, 5))
 
-for par0 in pargrid
-    println("optimize using $par0")
-    try
-        opt, func = run_optimization(par0, intervals, vT, f)
-    catch
-        opt, func = ["error", "error"]
-    end
+# for par0 in pargrid
+#     println("optimize using $par0")
+#     try
+#         opt, func = run_optimization(par0, intervals, vT, f)
+#     catch
+#         opt, func = ["error", "error"]
+#     end
 
-    push!(optlist, opt)
-    push!(parlist, par0)
-    push!(funclist, func)
+#     push!(optlist, opt)
+#     push!(parlist, par0)
+#     push!(funclist, func)
+# end
+
+# for (i, opt) in enumerate(optlist)
+#     try
+#         res = get_results(opt, funclist[i], intervals, vT, varnames)
+#         print(res)
+#     catch
+#         println("estimation not successful for parameters $(parlist[i])")
+#     end
+# end    
+
+##########
+# PREP DATA FOR EV HAWKES PROCESS
+
+# load electricvehicle data
+path = joinpath(dirname(dirname(@__FILE__)), "data", "processed", "electricvehicles.gzip");
+df = DataFrame(read_parquet(path));
+vT_ev = df.date;
+
+# compute climate process intensity at ev time points
+λ₀, α_fraction, δ = climate_pars
+α = α_fraction * δ
+
+climate_intensities = []
+for T in vT_ev
+    prev_T = [time for time in vT if time < T]
+    push!(climate_intensities, λ_exp(λ₀, T, prev_T, α = α, δ = δ))
 end
 
+# compute integral of climate process at ev time points
+last_T = vT_ev[end]
+climate_integral = 0.0
+for T in vT_ev
+    climate_integral +=  α/δ * (1-exp(-δ*(last_T - T)))
+end
+climate_integral += λ₀ * last_T
 
+# save to txt files
+path = joinpath(dirname(dirname(@__FILE__)), "data", "processed", "climate_intensities.txt");
+writedlm(path, climate_intensities)
 
-get_results(optlist[1], funclist[1], intervals, vT, varnames)
+path = joinpath(dirname(dirname(@__FILE__)), "data", "processed", "climate_integral.txt");
+writedlm(path, climate_integral)
 
+##########
+# PREP DATA FOR CAR HAWKES PROCESS
+
+# load electricvehicle data
+path = joinpath(dirname(dirname(@__FILE__)), "data", "processed", "carcomments.gzip");
+df = DataFrame(read_parquet(path));
+vT_ev = df.date;
+
+# compute climate process intensity at ev time points
+λ₀, α_fraction, δ = climate_pars
+α = α_fraction * δ
+
+climate_intensities = []
+for T in vT_ev
+    prev_T = [time for time in vT if time < T]
+    push!(climate_intensities, λ_exp(λ₀, T, prev_T, α = α, δ = δ))
+end
+
+# compute integral of climate process at ev time points
+last_T = vT_ev[end]
+climate_integral = 0.0
+for T in vT_ev
+    climate_integral +=  α/δ * (1-exp(-δ*(last_T - T)))
+end
+climate_integral += λ₀ * last_T
+
+# save to txt files
+path = joinpath(dirname(dirname(@__FILE__)), "data", "processed", "climate_intensities_car.txt");
+writedlm(path, climate_intensities)
+
+path = joinpath(dirname(dirname(@__FILE__)), "data", "processed", "climate_integral_car.txt");
+writedlm(path, climate_integral)
